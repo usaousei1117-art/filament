@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>フィラメント管理</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#2563eb">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f3f4f6; color: #1f2937; padding: 16px; max-width: 600px; margin: 0 auto; }
+    h1 { font-size: 1.5rem; margin-bottom: 16px; text-align: center; color: #111827; }
+    .card { background: #ffffff; border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .form-group { margin-bottom: 12px; }
+    label { display: block; font-size: 0.875rem; font-weight: 600; margin-bottom: 4px; }
+    input, select { width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 1rem; }
+    .row { display: flex; gap: 8px; }
+    .row > div { flex: 1; }
+    button { width: 100%; padding: 12px; background-color: #2563eb; color: white; border: none; border-radius: 6px; font-size: 1rem; font-weight: bold; cursor: pointer; margin-top: 8px; }
+    button:active { background-color: #1d4ed8; }
+    .search-bar { margin-bottom: 16px; }
+    .item-card { background: white; border-radius: 8px; padding: 12px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); display: flex; flex-direction: column; gap: 8px; border-left: 6px solid #ccc; }
+    .item-header { display: flex; justify-content: space-between; align-items: center; }
+    .item-title { font-weight: bold; font-size: 1.1rem; }
+    .item-sub { font-size: 0.85rem; color: #6b7280; }
+    .progress-bar { background: #e5e7eb; height: 10px; border-radius: 5px; overflow: hidden; margin: 6px 0; }
+    .progress-fill { height: 100%; background: #10b981; transition: width 0.3s; }
+    .weight-controls { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .btn-sm { width: auto; padding: 6px 12px; font-size: 0.875rem; margin-top: 0; }
+    .btn-danger { background-color: #ef4444; }
+    .btn-secondary { background-color: #6b7280; }
+  </style>
+</head>
+<body>
+
+  <h1>🧵 フィラメント管理</h1>
+
+  <!-- 登録フォーム -->
+  <div class="card">
+    <div class="form-group">
+      <label for="name">フィラメント名</label>
+      <input type="text" id="name" placeholder="例: Generic PLA Black">
+    </div>
+    <div class="row">
+      <div class="form-group">
+        <label for="material">素材</label>
+        <select id="material">
+          <option value="PLA">PLA</option>
+          <option value="PETG">PETG</option>
+          <option value="ABS">ABS</option>
+          <option value="TPU">TPU</option>
+          <option value="その他">その他</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="color">カラー (HEX/色名)</label>
+        <input type="color" id="color" value="#2563eb">
+      </div>
+    </div>
+    <div class="row">
+      <div class="form-group">
+        <label for="initialWeight">初期重量 (g)</label>
+        <input type="number" id="initialWeight" value="1000">
+      </div>
+      <div class="form-group">
+        <label for="currentWeight">現在残量 (g)</label>
+        <input type="number" id="currentWeight" value="1000">
+      </div>
+    </div>
+    <button onclick="addFilament()">追加する</button>
+  </div>
+
+  <!-- 検索 -->
+  <input type="text" id="search" class="search-bar" placeholder="🔍 名前や素材で検索..." oninput="render()">
+
+  <!-- 一覧表示 -->
+  <div id="list"></div>
+
+  <script>
+    // LocalStorageからデータ取得
+    let filaments = JSON.parse(localStorage.getItem('filaments') || '[]');
+
+    function save() {
+      localStorage.setItem('filaments', JSON.stringify(filaments));
+      render();
+    }
+
+    function addFilament() {
+      const name = document.getElementById('name').value.trim();
+      const material = document.getElementById('material').value;
+      const color = document.getElementById('color').value;
+      const initialWeight = Number(document.getElementById('initialWeight').value);
+      const currentWeight = Number(document.getElementById('currentWeight').value);
+
+      if (!name) {
+        alert('フィラメント名を入力してください');
+        return;
+      }
+
+      filaments.unshift({
+        id: Date.now(),
+        name,
+        material,
+        color,
+        initialWeight,
+        currentWeight
+      });
+
+      // フォーム初期化
+      document.getElementById('name').value = '';
+      save();
+    }
+
+    function updateWeight(id, change) {
+      const item = filaments.find(f => f.id === id);
+      if (item) {
+        item.currentWeight = Math.max(0, item.currentWeight + change);
+        save();
+      }
+    }
+
+    function deleteItem(id) {
+      if (confirm('このフィラメントを削除しますか？')) {
+        filaments = filaments.filter(f => f.id !== id);
+        save();
+      }
+    }
+
+    function render() {
+      const keyword = document.getElementById('search').value.toLowerCase();
+      const listEl = document.getElementById('list');
+      listEl.innerHTML = '';
+
+      const filtered = filaments.filter(f => 
+        f.name.toLowerCase().includes(keyword) || 
+        f.material.toLowerCase().includes(keyword)
+      );
+
+      filtered.forEach(f => {
+        const percent = Math.min(100, Math.max(0, Math.round((f.currentWeight / f.initialWeight) * 100)));
+        
+        const card = document.createElement('div');
+        card.className = 'item-card';
+        card.style.borderLeftColor = f.color;
+
+        card.innerHTML = `
+          <div class="item-header">
+            <div>
+              <span class="item-title">${f.name}</span>
+              <span class="item-sub">(${f.material})</span>
+            </div>
+            <button class="btn-sm btn-danger" onclick="deleteItem(${f.id})">削除</button>
+          </div>
+          <div>
+            <div class="item-sub">残量: ${f.currentWeight}g / ${f.initialWeight}g (${percent}%)</div>
+            <div class="progress-bar">
+              <div class="progress-fill" style="width: ${percent}%; background-color: ${percent < 20 ? '#ef4444' : '#10b981'};"></div>
+            </div>
+          </div>
+          <div class="weight-controls">
+            <div>
+              <button class="btn-sm btn-secondary" onclick="updateWeight(${f.id}, -50)">-50g</button>
+              <button class="btn-sm btn-secondary" onclick="updateWeight(${f.id}, -10)">-10g</button>
+              <button class="btn-sm btn-secondary" onclick="updateWeight(${f.id}, 10)">+10g</button>
+              <button class="btn-sm btn-secondary" onclick="updateWeight(${f.id}, 50)">+50g</button>
+            </div>
+          </div>
+        `;
+        listEl.appendChild(card);
+      });
+    }
+
+    // PWA用 ServiceWorker 登録
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+
+    // 初期描画
+    render();
+  </script>
+</body>
+</html>
