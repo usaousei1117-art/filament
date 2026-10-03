@@ -1,0 +1,1517 @@
+<!DOCTYPE html>
+<html lang="ja" class="h-full bg-slate-50">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Filament Tracker - フィラメント残量管理</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Google Fonts Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        .modal-backdrop {
+            background-color: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(4px);
+        }
+        /* Mobile Touch Optimization */
+        @media (max-width: 640px) {
+            input, select, textarea {
+                font-size: 16px !important; /* Prevents auto-zoom on mobile safari/chrome input focus */
+            }
+        }
+    </style>
+</head>
+<body class="h-full text-slate-800 flex flex-col font-sans antialiased pb-20 sm:pb-0">
+
+    <!-- Header Navigation -->
+    <header class="bg-slate-900 text-white sticky top-0 z-30 shadow-md">
+        <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-14 sm:h-16">
+                <!-- Logo & Title -->
+                <div class="flex items-center space-x-2 sm:space-x-3">
+                    <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center shadow-lg flex-shrink-0">
+                        <i class="fa-solid fa-spool text-base sm:text-xl text-white"></i>
+                    </div>
+                    <div class="min-w-0">
+                        <h1 class="font-bold text-base sm:text-lg leading-tight tracking-wide flex items-center gap-1.5 truncate">
+                            Filament<span class="text-indigo-400">Tracker</span>
+                            <span class="text-[10px] sm:text-xs bg-indigo-500/30 text-indigo-300 font-mono px-1.5 py-0.5 rounded-full border border-indigo-500/30">v1.2</span>
+                        </h1>
+                        <p class="text-[11px] text-slate-400 hidden sm:block">3Dプリンター用スプール・在庫管理システム</p>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="flex items-center space-x-1.5 sm:space-x-3">
+                    <button id="btnOpenUsageModal" class="bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-indigo-300 hover:text-white px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition flex items-center gap-1.5 border border-slate-700 shadow-sm touch-manipulation">
+                        <i class="fa-solid fa-minus text-xs"></i>
+                        <span class="inline">使用記録</span>
+                    </button>
+                    <button id="btnOpenAddModal" class="bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition flex items-center gap-1.5 shadow-lg shadow-indigo-600/30 touch-manipulation">
+                        <i class="fa-solid fa-plus text-xs"></i>
+                        <span class="inline sm:inline">新規登録</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Container -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6">
+
+        <!-- Low Stock Banner Alert (Shows conditionally) -->
+        <div id="lowStockAlertBanner" class="hidden bg-amber-50 border-l-4 border-amber-500 p-4 rounded-xl shadow-sm flex items-start justify-between">
+            <div class="flex items-start space-x-3">
+                <div class="text-amber-500 text-xl mt-0.5">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                </div>
+                <div>
+                    <h3 class="text-sm font-bold text-amber-800">フィラメント補充アラート</h3>
+                    <p class="text-xs text-amber-700 mt-0.5" id="lowStockAlertText">残量が20%未満になっているスプールがあります。発注を検討してください。</p>
+                </div>
+            </div>
+            <button onclick="filterByLowStock()" class="text-xs bg-amber-100 hover:bg-amber-200 text-amber-800 font-semibold px-3 py-1.5 rounded-lg border border-amber-300 transition whitespace-nowrap">
+                対象を表示
+            </button>
+        </div>
+
+        <!-- Dashboard Summary Stats -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-4">
+            <!-- Total Spools -->
+            <div class="bg-white p-3 sm:p-4 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-[11px] sm:text-xs font-medium text-slate-500">総スプール数</p>
+                        <p class="text-xl sm:text-2xl font-bold text-slate-800 mt-0.5 sm:mt-1" id="statTotalSpools">0</p>
+                    </div>
+                    <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center text-base sm:text-lg flex-shrink-0">
+                        <i class="fa-solid fa-boxes-stacked"></i>
+                    </div>
+                </div>
+                <div class="mt-1 sm:mt-2 text-[10px] sm:text-xs text-slate-400 truncate">アクティブ在庫</div>
+            </div>
+
+            <!-- Total Remaining Weight -->
+            <div class="bg-white p-3 sm:p-4 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-[11px] sm:text-xs font-medium text-slate-500">総残り重量</p>
+                        <p class="text-xl sm:text-2xl font-bold text-emerald-600 mt-0.5 sm:mt-1" id="statTotalWeight">0.0 <span class="text-xs sm:text-sm font-normal text-slate-500">kg</span></p>
+                    </div>
+                    <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center text-base sm:text-lg flex-shrink-0">
+                        <i class="fa-solid fa-weight-hanging"></i>
+                    </div>
+                </div>
+                <div class="mt-1 sm:mt-2 text-[10px] sm:text-xs text-slate-400 truncate">利用可能な素材総量</div>
+            </div>
+
+            <!-- Low Stock Warning Count -->
+            <div class="bg-white p-3 sm:p-4 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden" id="statLowStockCard">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-[11px] sm:text-xs font-medium text-slate-500">要補充 (&lt;20%)</p>
+                        <p class="text-xl sm:text-2xl font-bold text-slate-800 mt-0.5 sm:mt-1" id="statLowStockCount">0</p>
+                    </div>
+                    <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center text-base sm:text-lg flex-shrink-0" id="statLowStockIcon">
+                        <i class="fa-solid fa-triangle-exclamation"></i>
+                    </div>
+                </div>
+                <div class="mt-1 sm:mt-2 text-[10px] sm:text-xs text-slate-400 truncate">残量減少警告あり</div>
+            </div>
+
+            <!-- Total Used Weight -->
+            <div class="bg-white p-3 sm:p-4 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-[11px] sm:text-xs font-medium text-slate-500">累計プリント使用</p>
+                        <p class="text-xl sm:text-2xl font-bold text-purple-600 mt-0.5 sm:mt-1" id="statTotalUsed">0 <span class="text-xs sm:text-sm font-normal text-slate-500">g</span></p>
+                    </div>
+                    <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center text-base sm:text-lg flex-shrink-0">
+                        <i class="fa-solid fa-cubes"></i>
+                    </div>
+                </div>
+                <div class="mt-1 sm:mt-2 text-[10px] sm:text-xs text-slate-400 truncate">記録済み累計</div>
+            </div>
+        </div>
+
+        <!-- Controls & Filters Section -->
+        <div class="bg-white p-3 sm:p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row gap-3 sm:gap-4 items-stretch md:items-center justify-between">
+            <!-- Search & Filters -->
+            <div class="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 w-full md:w-auto items-center">
+                <!-- Search Input -->
+                <div class="relative col-span-2 sm:w-64">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                    <input type="text" id="searchInput" placeholder="検索 (名前/メーカー)..." class="w-full pl-8 pr-3 py-2 sm:py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition">
+                </div>
+
+                <!-- Material Filter -->
+                <select id="materialFilter" class="bg-slate-50 border border-slate-300 text-slate-700 text-xs sm:text-sm rounded-lg px-2.5 py-2 sm:py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full sm:w-auto">
+                    <option value="ALL">全素材</option>
+                    <option value="PLA">PLA</option>
+                    <option value="PETG">PETG</option>
+                    <option value="ABS">ABS</option>
+                    <option value="TPU">TPU</option>
+                    <option value="ASA">ASA</option>
+                    <option value="PC">PC</option>
+                    <option value="Nylon">Nylon</option>
+                    <option value="OTHER">その他</option>
+                </select>
+
+                <!-- Status Filter -->
+                <select id="statusFilter" class="bg-slate-50 border border-slate-300 text-slate-700 text-xs sm:text-sm rounded-lg px-2.5 py-2 sm:py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full sm:w-auto">
+                    <option value="ALL">全状態</option>
+                    <option value="OK">十分あり (&ge;20%)</option>
+                    <option value="LOW">⚠️ 要補充 (&lt;20%)</option>
+                </select>
+            </div>
+
+            <!-- View Options & Sort -->
+            <div class="flex items-center gap-2 sm:gap-3 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-2.5 md:pt-0 border-slate-100">
+                <div class="flex items-center gap-1.5 flex-1 sm:flex-initial">
+                    <label for="sortBy" class="text-xs text-slate-500 whitespace-nowrap">並び順:</label>
+                    <select id="sortBy" class="bg-slate-50 border border-slate-300 text-slate-700 text-xs sm:text-sm rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full sm:w-auto">
+                        <option value="updated">更新順</option>
+                        <option value="remainingAsc">残量 (少ない順)</option>
+                        <option value="remainingDesc">残量 (多い順)</option>
+                        <option value="name">名前順</option>
+                    </select>
+                </div>
+
+                <!-- View Toggle Buttons -->
+                <div class="bg-slate-100 p-1 rounded-lg border border-slate-200 flex items-center gap-1 flex-shrink-0">
+                    <button id="btnGridView" class="px-2 sm:px-2.5 py-1 rounded text-xs font-medium bg-white text-indigo-600 shadow-sm transition">
+                        <i class="fa-solid fa-grid-2"></i> <span class="hidden sm:inline">グリッド</span>
+                    </button>
+                    <button id="btnListView" class="px-2 sm:px-2.5 py-1 rounded text-xs font-medium text-slate-600 hover:text-slate-900 transition">
+                        <i class="fa-solid fa-list"></i> <span class="hidden sm:inline">リスト</span>
+                    </button>
+                    <button id="btnAnalyticsView" class="px-2 sm:px-2.5 py-1 rounded text-xs font-medium text-slate-600 hover:text-slate-900 transition">
+                        <i class="fa-solid fa-chart-pie"></i> <span class="hidden sm:inline">分析</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filament Cards Grid Container -->
+        <div id="filamentsGridContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-5">
+            <!-- Filament cards will be dynamically injected here -->
+        </div>
+
+        <!-- Analytics & Charts Container -->
+        <div id="analyticsContainer" class="hidden space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Material Breakdown Chart -->
+                <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                    <h3 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+                        <i class="fa-solid fa-chart-pie text-indigo-500"></i> 素材別在庫重量割合 (g)
+                    </h3>
+                    <div class="relative h-64 flex items-center justify-center">
+                        <canvas id="materialChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Usage Log History Chart -->
+                <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                    <h3 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+                        <i class="fa-solid fa-chart-column text-emerald-500"></i> 最近のプリント使用履歴
+                    </h3>
+                    <div class="relative h-64">
+                        <canvas id="usageHistoryChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Log History Table -->
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div class="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                    <h3 class="font-bold text-slate-800 text-sm flex items-center gap-2">
+                        <i class="fa-solid fa-clock-rotate-left text-slate-500"></i> 使用ログ（直近30件）
+                    </h3>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs">
+                        <thead class="bg-slate-100 text-slate-600 uppercase tracking-wider font-semibold border-b border-slate-200">
+                            <tr>
+                                <th class="p-3">日時</th>
+                                <th class="p-3">フィラメント名</th>
+                                <th class="p-3">素材</th>
+                                <th class="p-3 text-right">使用量</th>
+                                <th class="p-3">プリント用途 / メモ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="usageLogsTableBody" class="divide-y divide-slate-100 text-slate-700">
+                            <!-- Injected dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+
+    <!-- Modal 1: Add / Edit Filament Modal -->
+    <div id="filamentModal" class="fixed inset-0 z-50 flex items-end sm:items-center justify-center modal-backdrop hidden p-0 sm:p-4">
+        <div class="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl max-w-lg w-full max-h-[92vh] flex flex-col overflow-hidden animate-in slide-in-from-bottom sm:slide-in-from-none duration-200">
+            <!-- Modal Header -->
+            <div class="p-3.5 sm:p-5 bg-slate-900 text-white flex items-center justify-between flex-shrink-0">
+                <h3 class="font-bold text-sm sm:text-base flex items-center gap-2" id="modalFilamentTitle">
+                    <i class="fa-solid fa-spool text-indigo-400"></i> 新規フィラメント登録
+                </h3>
+                <button id="btnCloseFilamentModal" class="text-slate-400 hover:text-white p-1 rounded-lg transition touch-manipulation">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <!-- Modal Form Body -->
+            <form id="filamentForm" class="p-4 sm:p-5 overflow-y-auto custom-scrollbar space-y-3.5 sm:space-y-4 text-xs sm:text-sm">
+                <input type="hidden" id="editFilamentId" value="">
+
+                <!-- Filament Name -->
+                <div>
+                    <label class="block font-medium text-slate-700 mb-1">スプール / フィラメント名 <span class="text-rose-500">*</span></label>
+                    <input type="text" id="inputName" required placeholder="例: Bambu Basic PLA Black" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3 sm:gap-4">
+                    <!-- Brand -->
+                    <div>
+                        <label class="block font-medium text-slate-700 mb-1">メーカー / ブランド</label>
+                        <input type="text" id="inputBrand" placeholder="例: Bambu Lab" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    </div>
+
+                    <!-- Material Type -->
+                    <div>
+                        <label class="block font-medium text-slate-700 mb-1">素材種別 <span class="text-rose-500">*</span></label>
+                        <select id="inputMaterial" required class="w-full px-2.5 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white">
+                            <option value="PLA">PLA</option>
+                            <option value="PETG">PETG</option>
+                            <option value="ABS">ABS</option>
+                            <option value="TPU">TPU (Flex)</option>
+                            <option value="ASA">ASA</option>
+                            <option value="PC">PC</option>
+                            <option value="PET">PET</option>
+                            <option value="Nylon">Nylon (PA)</option>
+                            <option value="Wood">Wood-filled</option>
+                            <option value="CF">Carbon Fiber</option>
+                            <option value="Other">その他</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Custom Material Text (hidden unless 'Other' is selected) -->
+                <div id="customMaterialGroup" class="hidden">
+                    <label class="block font-medium text-slate-700 mb-1">素材名を入力</label>
+                    <input type="text" id="inputCustomMaterial" placeholder="例: PEEK, PVA" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+
+                <!-- Color Selection -->
+                <div>
+                    <label class="block font-medium text-slate-700 mb-1">カラー設定 <span class="text-rose-500">*</span></label>
+                    <div class="flex items-center gap-2 sm:gap-3 flex-wrap">
+                        <div class="flex items-center gap-2">
+                            <input type="color" id="inputColorPicker" value="#3b82f6" class="w-9 h-9 rounded border border-slate-300 cursor-pointer p-0.5 flex-shrink-0">
+                            <input type="text" id="inputColorHex" value="#3b82f6" placeholder="#3b82f6" class="w-24 px-2.5 py-2 border border-slate-300 rounded-lg font-mono text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        </div>
+                        
+                        <!-- Quick Color Swatches -->
+                        <div class="flex gap-2 items-center">
+                            <button type="button" onclick="setQuickColor('#18181b')" class="w-7 h-7 sm:w-6 sm:h-6 rounded-full bg-zinc-900 border border-slate-300 hover:scale-110 active:scale-95 transition touch-manipulation"></button>
+                            <button type="button" onclick="setQuickColor('#f8fafc')" class="w-7 h-7 sm:w-6 sm:h-6 rounded-full bg-slate-50 border border-slate-400 hover:scale-110 active:scale-95 transition touch-manipulation"></button>
+                            <button type="button" onclick="setQuickColor('#ef4444')" class="w-7 h-7 sm:w-6 sm:h-6 rounded-full bg-red-500 hover:scale-110 active:scale-95 transition touch-manipulation"></button>
+                            <button type="button" onclick="setQuickColor('#3b82f6')" class="w-7 h-7 sm:w-6 sm:h-6 rounded-full bg-blue-500 hover:scale-110 active:scale-95 transition touch-manipulation"></button>
+                            <button type="button" onclick="setQuickColor('#10b981')" class="w-7 h-7 sm:w-6 sm:h-6 rounded-full bg-emerald-500 hover:scale-110 active:scale-95 transition touch-manipulation"></button>
+                            <button type="button" onclick="setQuickColor('#f59e0b')" class="w-7 h-7 sm:w-6 sm:h-6 rounded-full bg-amber-500 hover:scale-110 active:scale-95 transition touch-manipulation"></button>
+                            <button type="button" onclick="setQuickColor('#8b5cf6')" class="w-7 h-7 sm:w-6 sm:h-6 rounded-full bg-purple-500 hover:scale-110 active:scale-95 transition touch-manipulation"></button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Weight Settings -->
+                <div class="grid grid-cols-2 gap-3 sm:gap-4">
+                    <div>
+                        <label class="block font-medium text-slate-700 mb-1">新品時重量 (g) <span class="text-rose-500">*</span></label>
+                        <input type="number" id="inputInitialWeight" required min="10" max="10000" value="1000" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block font-medium text-slate-700 mb-1">現在の残量 (g) <span class="text-rose-500">*</span></label>
+                        <input type="number" id="inputCurrentWeight" required min="0" max="10000" value="1000" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    </div>
+                </div>
+
+                <!-- Expanded Optional Fields -->
+                <div class="border-t border-slate-200 pt-3 space-y-3">
+                    <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">追加オプション（設定任意）</p>
+                    
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-[11px] font-medium text-slate-600 mb-1">推奨ノズル温度 (&deg;C)</label>
+                            <input type="text" id="inputNozzleTemp" placeholder="例: 200 - 220" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] font-medium text-slate-600 mb-1">推奨ベッド温度 (&deg;C)</label>
+                            <input type="text" id="inputBedTemp" placeholder="例: 50 - 60" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-[11px] font-medium text-slate-600 mb-1">空スプール単体重量 (g)</label>
+                            <input type="number" id="inputSpoolWeight" value="200" placeholder="200" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] font-medium text-slate-600 mb-1">購入価格 (&yen;)</label>
+                            <input type="number" id="inputPrice" placeholder="例: 2800" class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-[11px] font-medium text-slate-600 mb-1">メモ / 特記事項</label>
+                        <textarea id="inputNotes" rows="2" placeholder="購入場所や印刷条件の注意点など..." class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"></textarea>
+                    </div>
+                </div>
+
+                <!-- Submit Button -->
+                <div class="pt-2 flex flex-col-reverse sm:flex-row justify-end gap-2">
+                    <button type="button" id="btnCancelFilamentModal" class="w-full sm:w-auto px-4 py-2.5 sm:py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-100 font-medium transition touch-manipulation">
+                        キャンセル
+                    </button>
+                    <button type="submit" class="w-full sm:w-auto px-5 py-2.5 sm:py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium shadow-md transition touch-manipulation">
+                        保存する
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal 2: Record Usage Modal -->
+    <div id="usageModal" class="fixed inset-0 z-50 flex items-end sm:items-center justify-center modal-backdrop hidden p-0 sm:p-4">
+        <div class="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl max-w-md w-full overflow-hidden animate-in slide-in-from-bottom sm:slide-in-from-none duration-200">
+            <!-- Modal Header -->
+            <div class="p-3.5 sm:p-4 bg-slate-900 text-white flex items-center justify-between">
+                <h3 class="font-bold text-sm sm:text-base flex items-center gap-2">
+                    <i class="fa-solid fa-minus text-indigo-400"></i> プリント使用量を記録
+                </h3>
+                <button id="btnCloseUsageModal" class="text-slate-400 hover:text-white p-1 rounded-lg transition touch-manipulation">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <!-- Form -->
+            <form id="usageForm" class="p-4 sm:p-5 space-y-3.5 sm:space-y-4 text-xs sm:text-sm">
+                <!-- Select Filament -->
+                <div>
+                    <label class="block font-medium text-slate-700 mb-1">使用するフィラメント <span class="text-rose-500">*</span></label>
+                    <select id="usageFilamentSelect" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white">
+                        <!-- Options injected dynamically -->
+                    </select>
+                    <p id="usageFilamentStatus" class="text-xs text-slate-500 mt-1">現在の残り重量: -- g</p>
+                </div>
+
+                <!-- Used Weight Amount -->
+                <div>
+                    <label class="block font-medium text-slate-700 mb-1">使用量 (g) <span class="text-rose-500">*</span></label>
+                    <div class="relative">
+                        <input type="number" id="usageAmount" required min="1" max="5000" placeholder="例: 45" class="w-full pr-10 pl-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        <span class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-medium">g</span>
+                    </div>
+                    <!-- Touch friendly quick buttons grid -->
+                    <div class="grid grid-cols-4 gap-1.5 sm:gap-2 mt-2">
+                        <button type="button" onclick="addUsageAmount(10)" class="py-2 text-xs bg-slate-100 hover:bg-slate-200 active:bg-slate-300 rounded-lg border border-slate-300 font-medium transition touch-manipulation">+10g</button>
+                        <button type="button" onclick="addUsageAmount(25)" class="py-2 text-xs bg-slate-100 hover:bg-slate-200 active:bg-slate-300 rounded-lg border border-slate-300 font-medium transition touch-manipulation">+25g</button>
+                        <button type="button" onclick="addUsageAmount(50)" class="py-2 text-xs bg-slate-100 hover:bg-slate-200 active:bg-slate-300 rounded-lg border border-slate-300 font-medium transition touch-manipulation">+50g</button>
+                        <button type="button" onclick="addUsageAmount(100)" class="py-2 text-xs bg-slate-100 hover:bg-slate-200 active:bg-slate-300 rounded-lg border border-slate-300 font-medium transition touch-manipulation">+100g</button>
+                    </div>
+                </div>
+
+                <!-- Print Purpose / Notes -->
+                <div>
+                    <label class="block font-medium text-slate-700 mb-1">プリント用途 / メモ（任意）</label>
+                    <input type="text" id="usagePurpose" placeholder="例: テスト舟, スマホスタンド" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+
+                <div class="pt-2 flex flex-col-reverse sm:flex-row justify-end gap-2">
+                    <button type="button" id="btnCancelUsageModal" class="w-full sm:w-auto px-4 py-2.5 sm:py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-100 font-medium transition touch-manipulation">
+                        キャンセル
+                    </button>
+                    <button type="submit" class="w-full sm:w-auto px-5 py-2.5 sm:py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium shadow-md transition touch-manipulation">
+                        使用量を差し引く
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal 3: Filament Detail & History View Modal -->
+    <div id="detailModal" class="fixed inset-0 z-50 flex items-end sm:items-center justify-center modal-backdrop hidden p-0 sm:p-4">
+        <div class="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl max-w-xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in slide-in-from-bottom sm:slide-in-from-none duration-200">
+            <div class="p-3.5 sm:p-5 bg-slate-900 text-white flex items-center justify-between flex-shrink-0">
+                <div class="flex items-center gap-2.5 min-w-0 pr-2">
+                    <span id="detailColorBadge" class="w-4 h-4 rounded-full border border-white flex-shrink-0"></span>
+                    <h3 class="font-bold text-sm sm:text-base truncate" id="detailTitle">フィラメント詳細</h3>
+                </div>
+                <button id="btnCloseDetailModal" class="text-slate-400 hover:text-white p-1 rounded-lg transition flex-shrink-0 touch-manipulation">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <div class="p-4 sm:p-5 overflow-y-auto custom-scrollbar space-y-4 text-xs sm:text-sm">
+                <!-- Overview Row -->
+                <div class="bg-slate-50 p-3.5 sm:p-4 rounded-xl border border-slate-200 space-y-2.5">
+                    <div class="flex flex-wrap justify-between items-center gap-1">
+                        <span class="text-xs font-semibold uppercase text-slate-500 truncate" id="detailBrandAndMaterial">--</span>
+                        <span id="detailWarningBadge"></span>
+                    </div>
+
+                    <!-- Progress Bar -->
+                    <div>
+                        <div class="flex justify-between text-xs font-semibold mb-1">
+                            <span class="text-slate-600">残量割合</span>
+                            <span id="detailPercentText" class="font-bold">0%</span>
+                        </div>
+                        <div class="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
+                            <div id="detailProgressBar" class="h-3 rounded-full transition-all duration-300" style="width: 0%;"></div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2 text-xs pt-1">
+                        <div>残量: <span id="detailCurrentWeight" class="font-bold text-slate-800">0 g</span></div>
+                        <div>初期重量: <span id="detailInitialWeight" class="font-bold text-slate-800">0 g</span></div>
+                        <div>空スプール重: <span id="detailSpoolWeight" class="font-semibold text-slate-600">0 g</span></div>
+                        <div>スプール総重量: <span id="detailTotalSpoolWeight" class="font-semibold text-indigo-600">0 g</span></div>
+                    </div>
+                </div>
+
+                <!-- Print Settings Specs -->
+                <div class="grid grid-cols-2 gap-2.5 text-xs">
+                    <div class="p-2.5 sm:p-3 bg-slate-50 rounded-lg border border-slate-200">
+                        <span class="text-slate-500 block text-[11px]">推奨ノズル温度</span>
+                        <span class="font-bold text-slate-800 text-xs sm:text-sm" id="detailNozzleTemp">未設定</span>
+                    </div>
+                    <div class="p-2.5 sm:p-3 bg-slate-50 rounded-lg border border-slate-200">
+                        <span class="text-slate-500 block text-[11px]">推奨ベッド温度</span>
+                        <span class="font-bold text-slate-800 text-xs sm:text-sm" id="detailBedTemp">未設定</span>
+                    </div>
+                </div>
+
+                <!-- Individual Usage Log -->
+                <div>
+                    <h4 class="font-bold text-slate-800 mb-2 flex items-center gap-2 text-xs sm:text-sm">
+                        <i class="fa-solid fa-list-check text-indigo-500"></i> このスプールの使用履歴
+                    </h4>
+                    <div class="max-h-40 overflow-y-auto border border-slate-200 rounded-lg custom-scrollbar">
+                        <table class="w-full text-left text-xs">
+                            <thead class="bg-slate-100 text-slate-600 sticky top-0">
+                                <tr>
+                                    <th class="p-2">日時</th>
+                                    <th class="p-2">使用量</th>
+                                    <th class="p-2">用途 / メモ</th>
+                                </tr>
+                            </thead>
+                            <tbody id="detailLogsTable" class="divide-y divide-slate-100">
+                                <!-- Dynamic logs -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-3.5 sm:p-4 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                <button id="btnDeleteFilament" class="text-xs text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-3 py-2 rounded-lg border border-rose-200 font-medium transition touch-manipulation">
+                    <i class="fa-solid fa-trash mr-1"></i> 削除
+                </button>
+                <div class="flex gap-2 flex-1 sm:flex-initial justify-end">
+                    <button id="btnEditFilament" class="text-xs bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 px-3 py-2 rounded-lg font-medium transition touch-manipulation">
+                        <i class="fa-solid fa-pen-to-square mr-1"></i> 編集
+                    </button>
+                    <button id="btnQuickRecordUsage" class="text-xs bg-indigo-600 text-white hover:bg-indigo-500 px-3.5 py-2 rounded-lg font-medium transition shadow-sm touch-manipulation">
+                        <i class="fa-solid fa-minus mr-1"></i> 使用記録
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile Bottom Quick Action Navigation Bar (Visible on mobile screens) -->
+    <div class="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 px-4 py-2 flex items-center justify-around shadow-lg">
+        <button onclick="setViewMode('grid')" class="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white transition py-1">
+            <i class="fa-solid fa-border-all text-base"></i>
+            <span class="text-[10px]">一覧</span>
+        </button>
+        <button onclick="openUsageModal()" class="flex flex-col items-center gap-0.5 text-indigo-400 hover:text-indigo-300 transition py-1 font-semibold">
+            <div class="w-10 h-10 -mt-5 rounded-full bg-indigo-600 text-white border-2 border-slate-900 flex items-center justify-center shadow-lg active:scale-95 transition">
+                <i class="fa-solid fa-minus text-base"></i>
+            </div>
+            <span class="text-[10px] text-indigo-300">使用記録</span>
+        </button>
+        <button onclick="setViewMode('analytics')" class="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white transition py-1">
+            <i class="fa-solid fa-chart-pie text-base"></i>
+            <span class="text-[10px]">分析</span>
+        </button>
+    </div>
+
+    <!-- Notification Toast Box -->
+    <div id="toast" class="fixed bottom-16 sm:bottom-5 right-3 sm:right-5 left-3 sm:left-auto z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center space-x-3 transform translate-y-20 opacity-0 transition-all duration-300 pointer-events-none">
+        <div id="toastIcon" class="text-emerald-400 text-lg flex-shrink-0">
+            <i class="fa-solid fa-circle-check"></i>
+        </div>
+        <div class="text-xs sm:text-sm font-medium" id="toastMessage">操作が完了しました</div>
+    </div>
+
+    <!-- Custom Delete Confirmation Dialog Modal -->
+    <div id="confirmModal" class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop hidden px-4">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-5 text-center space-y-4">
+            <div class="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto text-xl">
+                <i class="fa-solid fa-trash"></i>
+            </div>
+            <h3 class="font-bold text-slate-800 text-base">スプールの削除確認</h3>
+            <p class="text-xs text-slate-600" id="confirmModalText">このフィラメントデータを削除してもよろしいですか？この操作は取り消せません。</p>
+            <div class="flex gap-2 justify-center pt-2">
+                <button id="btnConfirmCancel" class="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-100 text-xs font-semibold transition">
+                    キャンセル
+                </button>
+                <button id="btnConfirmDelete" class="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-semibold shadow-sm transition">
+                    削除する
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const STORAGE_KEY_FILAMENTS = 'filament_tracker_data_v1';
+        const STORAGE_KEY_LOGS = 'filament_tracker_logs_v1';
+
+        // Initial Sample Data if storage is empty
+        const sampleFilaments = [
+            {
+                id: 'f_sample_1',
+                name: 'Bambu Basic PLA Black',
+                brand: 'Bambu Lab',
+                material: 'PLA',
+                color: '#18181b',
+                initialWeight: 1000,
+                currentWeight: 780,
+                spoolWeight: 200,
+                nozzleTemp: '190-220',
+                bedTemp: '50-60',
+                price: 2600,
+                notes: 'メインで使用する高品質PLA。造形精度が高い。',
+                updatedAt: new Date(Date.now() - 86400000 * 2).toISOString()
+            },
+            {
+                id: 'f_sample_2',
+                name: 'eSUN PETG Solid Red',
+                brand: 'eSUN',
+                material: 'PETG',
+                color: '#ef4444',
+                initialWeight: 1000,
+                currentWeight: 180, // < 20% Low stock warning!
+                spoolWeight: 220,
+                nozzleTemp: '230-250',
+                bedTemp: '70-80',
+                price: 2400,
+                notes: '耐熱・高強度用。ケース類のプリントに使用。要再注文！',
+                updatedAt: new Date(Date.now() - 86400000 * 5).toISOString()
+            },
+            {
+                id: 'f_sample_3',
+                name: 'Overture TPU 95A Blue',
+                brand: 'Overture',
+                material: 'TPU',
+                color: '#3b82f6',
+                initialWeight: 1000,
+                currentWeight: 850,
+                spoolWeight: 210,
+                nozzleTemp: '210-230',
+                bedTemp: '40-50',
+                price: 3200,
+                notes: '柔軟パーツ・カバー用。ダイレクトドライブ推奨。',
+                updatedAt: new Date(Date.now() - 86400000 * 10).toISOString()
+            },
+            {
+                id: 'f_sample_4',
+                name: 'Sunlu ABS Standard White',
+                brand: 'Sunlu',
+                material: 'ABS',
+                color: '#f8fafc',
+                initialWeight: 1000,
+                currentWeight: 120, // < 20% Low stock warning!
+                spoolWeight: 200,
+                nozzleTemp: '240-260',
+                bedTemp: '90-100',
+                price: 2100,
+                notes: 'エンクロージャー必須。研磨加工用。',
+                updatedAt: new Date(Date.now() - 86400000 * 12).toISOString()
+            },
+            {
+                id: 'f_sample_5',
+                name: 'Polymaker PolyLite ASA Gray',
+                brand: 'Polymaker',
+                material: 'ASA',
+                color: '#64748b',
+                initialWeight: 1000,
+                currentWeight: 650,
+                spoolWeight: 200,
+                nozzleTemp: '240-260',
+                bedTemp: '90-105',
+                price: 3600,
+                notes: '屋外耐候性パーツ用。UV耐性あり。',
+                updatedAt: new Date(Date.now() - 86400000 * 1).toISOString()
+            }
+        ];
+
+        const sampleLogs = [
+            {
+                id: 'l_sample_1',
+                filamentId: 'f_sample_1',
+                amount: 120,
+                purpose: 'ツールホルダーパーツ印刷',
+                date: new Date(Date.now() - 86400000 * 2).toISOString()
+            },
+            {
+                id: 'l_sample_2',
+                filamentId: 'f_sample_2',
+                amount: 85,
+                purpose: '屋外センサージョイント',
+                date: new Date(Date.now() - 86400000 * 5).toISOString()
+            },
+            {
+                id: 'l_sample_3',
+                filamentId: 'f_sample_5',
+                amount: 210,
+                purpose: 'ドローンブラケット試作',
+                date: new Date(Date.now() - 86400000 * 1).toISOString()
+            }
+        ];
+
+        // State Variables
+        let filaments = [];
+        let usageLogs = [];
+        let activeViewMode = 'grid'; // 'grid' | 'list' | 'analytics'
+        let selectedFilamentForDetail = null;
+        let deleteTargetId = null;
+
+        // Chart instances
+        let materialChartInstance = null;
+        let usageChartInstance = null;
+
+        window.addEventListener('DOMContentLoaded', () => {
+            loadData();
+            setupEventListeners();
+            renderUI();
+        });
+
+        // Load Data from LocalStorage
+        function loadData() {
+            const storedFilaments = localStorage.getItem(STORAGE_KEY_FILAMENTS);
+            const storedLogs = localStorage.getItem(STORAGE_KEY_LOGS);
+
+            if (storedFilaments) {
+                try {
+                    filaments = JSON.parse(storedFilaments);
+                } catch (e) {
+                    filaments = sampleFilaments;
+                }
+            } else {
+                filaments = sampleFilaments;
+                saveData();
+            }
+
+            if (storedLogs) {
+                try {
+                    usageLogs = JSON.parse(storedLogs);
+                } catch (e) {
+                    usageLogs = sampleLogs;
+                }
+            } else {
+                usageLogs = sampleLogs;
+                saveData();
+            }
+        }
+
+        // Save Data to LocalStorage
+        function saveData() {
+            localStorage.setItem(STORAGE_KEY_FILAMENTS, JSON.stringify(filaments));
+            localStorage.setItem(STORAGE_KEY_LOGS, JSON.stringify(usageLogs));
+        }
+
+        function setupEventListeners() {
+            // Modal Open Triggers
+            document.getElementById('btnOpenAddModal').addEventListener('click', () => openFilamentModal());
+            document.getElementById('btnOpenUsageModal').addEventListener('click', () => openUsageModal());
+
+            // Modal Close Buttons
+            document.getElementById('btnCloseFilamentModal').addEventListener('click', closeFilamentModal);
+            document.getElementById('btnCancelFilamentModal').addEventListener('click', closeFilamentModal);
+            document.getElementById('btnCloseUsageModal').addEventListener('click', closeUsageModal);
+            document.getElementById('btnCancelUsageModal').addEventListener('click', closeUsageModal);
+            document.getElementById('btnCloseDetailModal').addEventListener('click', closeDetailModal);
+
+            // Form Submit Events
+            document.getElementById('filamentForm').addEventListener('submit', handleFilamentSubmit);
+            document.getElementById('usageForm').addEventListener('submit', handleUsageSubmit);
+
+            // Material Select Change for Custom Material Input
+            document.getElementById('inputMaterial').addEventListener('change', (e) => {
+                const customGroup = document.getElementById('customMaterialGroup');
+                if (e.target.value === 'Other') {
+                    customGroup.classList.remove('hidden');
+                } else {
+                    customGroup.classList.add('hidden');
+                }
+            });
+
+            // Color Picker & Hex Code Sync
+            const picker = document.getElementById('inputColorPicker');
+            const hexInput = document.getElementById('inputColorHex');
+            picker.addEventListener('input', (e) => { hexInput.value = e.target.value; });
+            hexInput.addEventListener('input', (e) => {
+                if (/^#[0-9A-F]{6}$/i.test(e.target.value)) {
+                    picker.value = e.target.value;
+                }
+            });
+
+            // Filtering & Sorting Inputs
+            document.getElementById('searchInput').addEventListener('input', renderUI);
+            document.getElementById('materialFilter').addEventListener('change', renderUI);
+            document.getElementById('statusFilter').addEventListener('change', renderUI);
+            document.getElementById('sortBy').addEventListener('change', renderUI);
+
+            // View Mode Switching
+            document.getElementById('btnGridView').addEventListener('click', () => setViewMode('grid'));
+            document.getElementById('btnListView').addEventListener('click', () => setViewMode('list'));
+            document.getElementById('btnAnalyticsView').addEventListener('click', () => setViewMode('analytics'));
+
+            // Detail Modal Action Buttons
+            document.getElementById('btnEditFilament').addEventListener('click', () => {
+                if (selectedFilamentForDetail) {
+                    closeDetailModal();
+                    openFilamentModal(selectedFilamentForDetail);
+                }
+            });
+            document.getElementById('btnQuickRecordUsage').addEventListener('click', () => {
+                if (selectedFilamentForDetail) {
+                    const fid = selectedFilamentForDetail.id;
+                    closeDetailModal();
+                    openUsageModal(fid);
+                }
+            });
+            document.getElementById('btnDeleteFilament').addEventListener('click', () => {
+                if (selectedFilamentForDetail) {
+                    openConfirmModal(selectedFilamentForDetail.id, selectedFilamentForDetail.name);
+                }
+            });
+
+            // Confirm Modal Events
+            document.getElementById('btnConfirmCancel').addEventListener('click', closeConfirmModal);
+            document.getElementById('btnConfirmDelete').addEventListener('click', () => {
+                if (deleteTargetId) {
+                    deleteFilament(deleteTargetId);
+                    closeConfirmModal();
+                    closeDetailModal();
+                }
+            });
+        }
+
+        function setQuickColor(hex) {
+            document.getElementById('inputColorPicker').value = hex;
+            document.getElementById('inputColorHex').value = hex;
+        }
+
+        function addUsageAmount(grams) {
+            const amountInput = document.getElementById('usageAmount');
+            const currentVal = parseInt(amountInput.value) || 0;
+            amountInput.value = currentVal + grams;
+        }
+
+        function filterByLowStock() {
+            document.getElementById('statusFilter').value = 'LOW';
+            setViewMode('grid');
+            renderUI();
+        }
+
+        function renderUI() {
+            updateDashboardStats();
+            
+            const searchKeyword = document.getElementById('searchInput').value.toLowerCase().trim();
+            const materialFilter = document.getElementById('materialFilter').value;
+            const statusFilter = document.getElementById('statusFilter').value;
+            const sortBy = document.getElementById('sortBy').value;
+
+            // Filter Filaments
+            let filtered = filaments.filter(f => {
+                const matchesSearch = f.name.toLowerCase().includes(searchKeyword) || 
+                                      (f.brand && f.brand.toLowerCase().includes(searchKeyword));
+                
+                const matchesMaterial = (materialFilter === 'ALL') || 
+                                        (materialFilter === 'OTHER' ? !['PLA','PETG','ABS','TPU','ASA','PC','Nylon'].includes(f.material) : f.material === materialFilter);
+
+                const percent = Math.round((f.currentWeight / f.initialWeight) * 100);
+                const isLow = percent < 20;
+                const matchesStatus = (statusFilter === 'ALL') || 
+                                      (statusFilter === 'OK' && !isLow) || 
+                                      (statusFilter === 'LOW' && isLow);
+
+                return matchesSearch && matchesMaterial && matchesStatus;
+            });
+
+            // Sort Filaments
+            filtered.sort((a, b) => {
+                const percentA = (a.currentWeight / a.initialWeight) * 100;
+                const percentB = (b.currentWeight / b.initialWeight) * 100;
+
+                if (sortBy === 'remainingAsc') return percentA - percentB;
+                if (sortBy === 'remainingDesc') return percentB - percentA;
+                if (sortBy === 'name') return a.name.localeCompare(b.name, 'ja');
+                // Default: updated date descending
+                return new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0);
+            });
+
+            // Render view according to active tab mode
+            const gridContainer = document.getElementById('filamentsGridContainer');
+            const analyticsContainer = document.getElementById('analyticsContainer');
+
+            if (activeViewMode === 'analytics') {
+                gridContainer.classList.add('hidden');
+                analyticsContainer.classList.remove('hidden');
+                renderAnalyticsCharts();
+                renderUsageLogTable();
+            } else {
+                analyticsContainer.classList.add('hidden');
+                gridContainer.classList.remove('hidden');
+
+                if (activeViewMode === 'list') {
+                    gridContainer.className = 'flex flex-col gap-3';
+                } else {
+                    gridContainer.className = 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5';
+                }
+
+                if (filtered.length === 0) {
+                    gridContainer.innerHTML = `
+                        <div class="col-span-full py-12 text-center text-slate-400 bg-white rounded-xl border border-slate-200">
+                            <i class="fa-solid fa-box-open text-4xl mb-3 opacity-50"></i>
+                            <p class="font-medium text-sm">該当するフィラメントが見つかりませんでした。</p>
+                            <p class="text-xs mt-1">検索条件を変更するか、新しいスプールを登録してください。</p>
+                        </div>
+                    `;
+                } else {
+                    gridContainer.innerHTML = filtered.map(f => createFilamentCardHTML(f, activeViewMode === 'list')).join('');
+                }
+            }
+        }
+
+        function createFilamentCardHTML(filament, isListView) {
+            const percent = Math.clamp ? Math.clamp(Math.round((filament.currentWeight / filament.initialWeight) * 100), 0, 100)
+                                       : Math.max(0, Math.min(100, Math.round((filament.currentWeight / filament.initialWeight) * 100)));
+            const isLowStock = percent < 20;
+
+            // Progress bar color according to remaining percentage
+            let barColor = 'bg-emerald-500';
+            let textColor = 'text-emerald-700';
+            if (percent < 20) {
+                barColor = 'bg-rose-500';
+                textColor = 'text-rose-600';
+            } else if (percent < 50) {
+                barColor = 'bg-amber-500';
+                textColor = 'text-amber-700';
+            }
+
+            // Material badge pill colors
+            const matColors = {
+                'PLA': 'bg-blue-100 text-blue-800 border-blue-200',
+                'PETG': 'bg-emerald-100 text-emerald-800 border-emerald-200',
+                'ABS': 'bg-amber-100 text-amber-800 border-amber-200',
+                'TPU': 'bg-purple-100 text-purple-800 border-purple-200',
+                'ASA': 'bg-slate-200 text-slate-800 border-slate-300',
+                'PC': 'bg-indigo-100 text-indigo-800 border-indigo-200',
+                'Nylon': 'bg-pink-100 text-pink-800 border-pink-200'
+            };
+            const matBadgeClass = matColors[filament.material] || 'bg-slate-100 text-slate-700 border-slate-200';
+
+            // Is the background color very light?
+            const isLightColor = ['#ffffff', '#f8fafc', '#ffffff'].includes(filament.color.toLowerCase());
+
+            if (isListView) {
+                return `
+                <div class="bg-white rounded-xl border ${isLowStock ? 'border-rose-400 ring-2 ring-rose-200 bg-rose-50/30' : 'border-slate-200'} p-3 sm:p-4 shadow-sm hover:shadow-md transition flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
+                    <div class="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1 w-full sm:w-auto">
+                        <div class="w-6 h-6 sm:w-7 sm:h-7 rounded-full flex-shrink-0 border ${isLightColor ? 'border-slate-400' : 'border-transparent'}" style="background-color: ${filament.color};"></div>
+                        <div class="truncate flex-1">
+                            <div class="flex flex-wrap items-center gap-1.5">
+                                <h3 class="font-bold text-slate-800 text-xs sm:text-sm truncate cursor-pointer hover:text-indigo-600" onclick="openDetailModal('${filament.id}')">${escapeHTML(filament.name)}</h3>
+                                <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded border ${matBadgeClass}">${escapeHTML(filament.material)}</span>
+                                ${isLowStock ? '<span class="text-[9px] sm:text-[10px] bg-rose-100 text-rose-700 font-bold px-1.5 py-0.5 rounded border border-rose-300 animate-pulse-slow">⚠ 補充推奨</span>' : ''}
+                            </div>
+                            <p class="text-[11px] sm:text-xs text-slate-500 mt-0.5">${filament.brand ? escapeHTML(filament.brand) + ' • ' : ''}残り: <span class="font-bold text-slate-700">${filament.currentWeight} g</span> / ${filament.initialWeight} g</p>
+                        </div>
+                    </div>
+
+                    <div class="w-full sm:w-48 flex-shrink-0">
+                        <div class="flex justify-between text-[11px] sm:text-xs font-semibold mb-1">
+                            <span class="text-slate-500">残量割合</span>
+                            <span class="${textColor}">${percent}%</span>
+                        </div>
+                        <div class="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden border border-slate-200">
+                            <div class="${barColor} h-2.5 rounded-full" style="width: ${percent}%;"></div>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-2 w-full sm:w-auto justify-end pt-1 sm:pt-0 border-t sm:border-t-0 border-slate-100">
+                        <button onclick="openUsageModal('${filament.id}')" class="text-xs bg-indigo-50 hover:bg-indigo-100 active:bg-indigo-200 text-indigo-700 px-3 py-1.5 rounded-lg border border-indigo-200 font-medium transition whitespace-nowrap touch-manipulation">
+                            <i class="fa-solid fa-minus text-[10px] mr-1"></i> 使用記録
+                        </button>
+                        <button onclick="openDetailModal('${filament.id}')" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 p-1.5 rounded-lg transition touch-manipulation" title="詳細">
+                            <i class="fa-solid fa-ellipsis-vertical px-1"></i>
+                        </button>
+                    </div>
+                </div>
+                `;
+            }
+
+            // Grid View Card
+            return `
+            <div class="bg-white rounded-xl border ${isLowStock ? 'border-rose-300 ring-2 ring-rose-200/70' : 'border-slate-200'} p-3.5 sm:p-5 shadow-sm hover:shadow-md transition flex flex-col justify-between relative group overflow-hidden">
+                ${isLowStock ? '<div class="absolute top-0 right-0 bg-rose-500 text-white text-[9px] sm:text-[10px] font-bold px-2.5 py-0.5 rounded-bl-lg shadow-sm flex items-center gap-1"><i class="fa-solid fa-triangle-exclamation"></i> 要補充 (&lt;20%)</div>' : ''}
+
+                <div>
+                    <!-- Card Top Info -->
+                    <div class="flex items-start gap-2.5 sm:gap-3 mb-2.5 sm:mb-3">
+                        <div class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex-shrink-0 border shadow-inner ${isLightColor ? 'border-slate-300' : 'border-slate-200'}" style="background-color: ${filament.color};"></div>
+                        <div class="min-w-0 flex-1 ${isLowStock ? 'pr-14 sm:pr-16' : ''}">
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded border ${matBadgeClass} inline-block mb-1">${escapeHTML(filament.material)}</span>
+                            <h3 class="font-bold text-slate-800 text-xs sm:text-sm leading-tight truncate cursor-pointer hover:text-indigo-600 transition" onclick="openDetailModal('${filament.id}')" title="${escapeHTML(filament.name)}">
+                                ${escapeHTML(filament.name)}
+                            </h3>
+                            <p class="text-[11px] sm:text-xs text-slate-400 mt-0.5">${filament.brand ? escapeHTML(filament.brand) : 'メーカー未設定'}</p>
+                        </div>
+                    </div>
+
+                    <!-- Progress Bar Section -->
+                    <div class="space-y-1.5 my-3 sm:my-4">
+                        <div class="flex justify-between items-baseline text-xs">
+                            <span class="text-slate-500 text-[11px] sm:text-xs">残量</span>
+                            <span class="font-bold ${textColor}">${percent}% <span class="text-slate-400 font-normal text-[11px]">(${filament.currentWeight}g)</span></span>
+                        </div>
+                        <div class="w-full bg-slate-100 rounded-full h-2.5 sm:h-3 overflow-hidden border border-slate-200">
+                            <div class="${barColor} h-2.5 sm:h-3 rounded-full transition-all duration-500" style="width: ${percent}%;"></div>
+                        </div>
+                        <div class="flex justify-between text-[10px] sm:text-[11px] text-slate-400 pt-0.5">
+                            <span>0g</span>
+                            <span>初期: ${filament.initialWeight}g</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Footer Action Buttons -->
+                <div class="pt-2.5 sm:pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                    <button onclick="openDetailModal('${filament.id}')" class="text-xs text-slate-600 hover:text-indigo-600 font-medium flex items-center gap-1 transition py-1 touch-manipulation">
+                        <i class="fa-solid fa-circle-info text-xs"></i> <span class="text-[11px] sm:text-xs">詳細/履歴</span>
+                    </button>
+
+                    <button onclick="openUsageModal('${filament.id}')" class="text-xs bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 active:scale-95 px-2.5 sm:px-3 py-1.5 rounded-lg border border-indigo-200 font-semibold transition flex items-center gap-1 touch-manipulation">
+                        <i class="fa-solid fa-minus text-[10px]"></i> 使用記録
+                    </button>
+                </div>
+            </div>
+            `;
+        }
+
+        function updateDashboardStats() {
+            const totalSpools = filaments.length;
+            const totalWeightGram = filaments.reduce((sum, f) => sum + f.currentWeight, 0);
+            const lowStockList = filaments.filter(f => (f.currentWeight / f.initialWeight) < 0.2);
+            const totalUsedGram = usageLogs.reduce((sum, l) => sum + l.amount, 0);
+
+            document.getElementById('statTotalSpools').textContent = totalSpools;
+            document.getElementById('statTotalWeight').innerHTML = `${(totalWeightGram / 1000).toFixed(2)} <span class="text-sm font-normal text-slate-500">kg</span>`;
+            document.getElementById('statLowStockCount').textContent = lowStockList.length;
+            document.getElementById('statTotalUsed').innerHTML = `${totalUsedGram.toLocaleString()} <span class="text-sm font-normal text-slate-500">g</span>`;
+
+            // Low Stock Banner Alert handling
+            const alertBanner = document.getElementById('lowStockAlertBanner');
+            const alertText = document.getElementById('lowStockAlertText');
+            if (lowStockList.length > 0) {
+                alertBanner.classList.remove('hidden');
+                alertText.textContent = `現在 ${lowStockList.length} 個のスプール（${lowStockList.map(f => f.name).slice(0,2).join(', ')}${lowStockList.length > 2 ? 'など' : ''}）の残量が20%未満です。`;
+            } else {
+                alertBanner.classList.add('hidden');
+            }
+        }
+
+        function renderAnalyticsCharts() {
+            // Material Weight Distribution Chart
+            const materialMap = {};
+            filaments.forEach(f => {
+                const mat = f.material || 'Other';
+                materialMap[mat] = (materialMap[mat] || 0) + f.currentWeight;
+            });
+
+            const labels = Object.keys(materialMap);
+            const dataValues = Object.values(materialMap);
+            const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#64748b', '#6366f1', '#ec4899', '#14b8a6'];
+
+            const ctx1 = document.getElementById('materialChart').getContext('2d');
+            if (materialChartInstance) materialChartInstance.destroy();
+
+            materialChartInstance = new Chart(ctx1, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: dataValues,
+                        backgroundColor: colors.slice(0, labels.length),
+                        borderWidth: 2,
+                        borderColor: '#ffffff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'right', labels: { font: { family: 'Inter', size: 11 } } },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return ` ${context.label}: ${context.raw} g`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Usage Log History Chart (Last 10 entries)
+            const recentLogs = [...usageLogs].slice(-10);
+            const ctx2 = document.getElementById('usageHistoryChart').getContext('2d');
+            if (usageChartInstance) usageChartInstance.destroy();
+
+            usageChartInstance = new Chart(ctx2, {
+                type: 'bar',
+                data: {
+                    labels: recentLogs.map(l => {
+                        const date = new Date(l.date);
+                        return `${date.getMonth()+1}/${date.getDate()}`;
+                    }),
+                    datasets: [{
+                        label: '使用量 (g)',
+                        data: recentLogs.map(l => l.amount),
+                        backgroundColor: '#6366f1',
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { beginAtZero: true, grid: { color: '#f1f5f9' } },
+                        x: { grid: { display: false } }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                afterLabel: function(context) {
+                                    const log = recentLogs[context.dataIndex];
+                                    return log.purpose ? `用途: ${log.purpose}` : '';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Render Usage Log Table in Analytics Tab
+        function renderUsageLogTable() {
+            const tbody = document.getElementById('usageLogsTableBody');
+            const sortedLogs = [...usageLogs].sort((a,b) => new Date(b.date) - new Date(a.date)).slice(0, 30);
+
+            if (sortedLogs.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-slate-400">使用記録ログがまだありません。</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = sortedLogs.map(log => {
+                const targetFilament = filaments.find(f => f.id === log.filamentId);
+                const filName = targetFilament ? targetFilament.name : '（削除済みスプール）';
+                const filMat = targetFilament ? targetFilament.material : '-';
+                const formattedDate = new Date(log.date).toLocaleString('ja-JP', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
+
+                return `
+                    <tr class="hover:bg-slate-50 transition">
+                        <td class="p-3 text-slate-500 font-mono whitespace-nowrap">${formattedDate}</td>
+                        <td class="p-3 font-semibold text-slate-800">${escapeHTML(filName)}</td>
+                        <td class="p-3"><span class="px-2 py-0.5 rounded text-[10px] bg-slate-100 border border-slate-200">${escapeHTML(filMat)}</span></td>
+                        <td class="p-3 font-bold text-indigo-600 text-right font-mono">-${log.amount} g</td>
+                        <td class="p-3 text-slate-600">${log.purpose ? escapeHTML(log.purpose) : '<span class="text-slate-300">-</span>'}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function openFilamentModal(filamentToEdit = null) {
+            const modal = document.getElementById('filamentModal');
+            const form = document.getElementById('filamentForm');
+            const title = document.getElementById('modalFilamentTitle');
+
+            form.reset();
+
+            if (filamentToEdit) {
+                title.innerHTML = `<i class="fa-solid fa-pen-to-square text-indigo-400"></i> フィラメント情報の編集`;
+                document.getElementById('editFilamentId').value = filamentToEdit.id;
+                document.getElementById('inputName').value = filamentToEdit.name;
+                document.getElementById('inputBrand').value = filamentToEdit.brand || '';
+                
+                const matSelect = document.getElementById('inputMaterial');
+                if (['PLA','PETG','ABS','TPU','ASA','PC','PET','Nylon','Wood','CF'].includes(filamentToEdit.material)) {
+                    matSelect.value = filamentToEdit.material;
+                    document.getElementById('customMaterialGroup').classList.add('hidden');
+                } else {
+                    matSelect.value = 'Other';
+                    document.getElementById('customMaterialGroup').classList.remove('hidden');
+                    document.getElementById('inputCustomMaterial').value = filamentToEdit.material;
+                }
+
+                document.getElementById('inputColorPicker').value = filamentToEdit.color || '#3b82f6';
+                document.getElementById('inputColorHex').value = filamentToEdit.color || '#3b82f6';
+                document.getElementById('inputInitialWeight').value = filamentToEdit.initialWeight;
+                document.getElementById('inputCurrentWeight').value = filamentToEdit.currentWeight;
+                document.getElementById('inputNozzleTemp').value = filamentToEdit.nozzleTemp || '';
+                document.getElementById('inputBedTemp').value = filamentToEdit.bedTemp || '';
+                document.getElementById('inputSpoolWeight').value = filamentToEdit.spoolWeight || 200;
+                document.getElementById('inputPrice').value = filamentToEdit.price || '';
+                document.getElementById('inputNotes').value = filamentToEdit.notes || '';
+            } else {
+                title.innerHTML = `<i class="fa-solid fa-spool text-indigo-400"></i> 新規フィラメント登録`;
+                document.getElementById('editFilamentId').value = '';
+                document.getElementById('inputMaterial').value = 'PLA';
+                document.getElementById('customMaterialGroup').classList.add('hidden');
+                setQuickColor('#3b82f6');
+            }
+
+            modal.classList.remove('hidden');
+        }
+
+        function closeFilamentModal() {
+            document.getElementById('filamentModal').classList.add('hidden');
+        }
+
+        function handleFilamentSubmit(e) {
+            e.preventDefault();
+
+            const editId = document.getElementById('editFilamentId').value;
+            const name = document.getElementById('inputName').value.trim();
+            const brand = document.getElementById('inputBrand').value.trim();
+            let material = document.getElementById('inputMaterial').value;
+            if (material === 'Other') {
+                material = document.getElementById('inputCustomMaterial').value.trim() || 'その他';
+            }
+
+            const color = document.getElementById('inputColorPicker').value;
+            const initialWeight = parseInt(document.getElementById('inputInitialWeight').value) || 1000;
+            const currentWeight = parseInt(document.getElementById('inputCurrentWeight').value) || initialWeight;
+            const nozzleTemp = document.getElementById('inputNozzleTemp').value.trim();
+            const bedTemp = document.getElementById('inputBedTemp').value.trim();
+            const spoolWeight = parseInt(document.getElementById('inputSpoolWeight').value) || 200;
+            const price = parseInt(document.getElementById('inputPrice').value) || null;
+            const notes = document.getElementById('inputNotes').value.trim();
+
+            if (editId) {
+                // Update Existing
+                const index = filaments.findIndex(f => f.id === editId);
+                if (index !== -1) {
+                    filaments[index] = {
+                        ...filaments[index],
+                        name, brand, material, color, initialWeight, currentWeight,
+                        nozzleTemp, bedTemp, spoolWeight, price, notes,
+                        updatedAt: new Date().toISOString()
+                    };
+                    showToast('フィラメント情報を更新しました', 'success');
+                }
+            } else {
+                // Create New
+                const newFilament = {
+                    id: 'f_' + Date.now(),
+                    name, brand, material, color, initialWeight, currentWeight,
+                    nozzleTemp, bedTemp, spoolWeight, price, notes,
+                    updatedAt: new Date().toISOString()
+                };
+                filaments.unshift(newFilament);
+                showToast('新しいスプールを登録しました', 'success');
+            }
+
+            saveData();
+            closeFilamentModal();
+            renderUI();
+        }
+
+        // Open Usage Modal
+        function openUsageModal(preselectedId = null) {
+            if (filaments.length === 0) {
+                showToast('登録されているフィラメントがありません。', 'warning');
+                return;
+            }
+
+            const modal = document.getElementById('usageModal');
+            const select = document.getElementById('usageFilamentSelect');
+            const form = document.getElementById('usageForm');
+
+            form.reset();
+
+            // Populate options
+            select.innerHTML = filaments.map(f => {
+                const percent = Math.round((f.currentWeight / f.initialWeight) * 100);
+                return `<option value="${f.id}" ${f.id === preselectedId ? 'selected' : ''}>${escapeHTML(f.name)} (${f.material} - 残り${f.currentWeight}g / ${percent}%)</option>`;
+            }).join('');
+
+            updateUsageStatusText();
+            select.removeEventListener('change', updateUsageStatusText);
+            select.addEventListener('change', updateUsageStatusText);
+
+            modal.classList.remove('hidden');
+        }
+
+        function updateUsageStatusText() {
+            const select = document.getElementById('usageFilamentSelect');
+            const fid = select.value;
+            const target = filaments.find(f => f.id === fid);
+            const statusEl = document.getElementById('usageFilamentStatus');
+
+            if (target) {
+                const percent = Math.round((target.currentWeight / target.initialWeight) * 100);
+                statusEl.innerHTML = `現在の残量: <span class="font-bold text-slate-800">${target.currentWeight} g</span> (${percent}%)`;
+            } else {
+                statusEl.textContent = '';
+            }
+        }
+
+        function closeUsageModal() {
+            document.getElementById('usageModal').classList.add('hidden');
+        }
+
+        function handleUsageSubmit(e) {
+            e.preventDefault();
+
+            const fid = document.getElementById('usageFilamentSelect').value;
+            const amount = parseInt(document.getElementById('usageAmount').value) || 0;
+            const purpose = document.getElementById('usagePurpose').value.trim();
+
+            const target = filaments.find(f => f.id === fid);
+            if (!target) return;
+
+            if (amount <= 0) {
+                showToast('1g以上の使用量を入力してください。', 'warning');
+                return;
+            }
+
+            // Deduct weight
+            const newWeight = Math.max(0, target.currentWeight - amount);
+            target.currentWeight = newWeight;
+            target.updatedAt = new Date().toISOString();
+
+            // Add usage log
+            const newLog = {
+                id: 'l_' + Date.now(),
+                filamentId: fid,
+                amount: amount,
+                purpose: purpose,
+                date: new Date().toISOString()
+            };
+            usageLogs.unshift(newLog);
+
+            saveData();
+            closeUsageModal();
+
+            const percent = Math.round((newWeight / target.initialWeight) * 100);
+            if (percent < 20) {
+                showToast(`使用を記録しました。⚠️ 残量が20%未満になりました！ (${percent}%)`, 'warning');
+            } else {
+                showToast(`使用量を記録しました (-${amount}g)`, 'success');
+            }
+
+            renderUI();
+        }
+
+        // Detail View Modal Logic
+        function openDetailModal(id) {
+            const target = filaments.find(f => f.id === id);
+            if (!target) return;
+
+            selectedFilamentForDetail = target;
+            const modal = document.getElementById('detailModal');
+
+            document.getElementById('detailTitle').textContent = target.name;
+            document.getElementById('detailColorBadge').style.backgroundColor = target.color;
+            document.getElementById('detailBrandAndMaterial').textContent = `${target.brand || 'メーカー未設定'} • 素材: ${target.material}`;
+
+            const percent = Math.max(0, Math.min(100, Math.round((target.currentWeight / target.initialWeight) * 100)));
+            document.getElementById('detailPercentText').textContent = `${percent}%`;
+
+            const progressBar = document.getElementById('detailProgressBar');
+            progressBar.style.width = `${percent}%`;
+
+            const warningBadge = document.getElementById('detailWarningBadge');
+            if (percent < 20) {
+                progressBar.className = 'h-3 rounded-full bg-rose-500 transition-all duration-300';
+                warningBadge.innerHTML = `<span class="text-xs bg-rose-100 text-rose-700 font-bold px-2.5 py-1 rounded-full border border-rose-300">⚠️ 要補充 (残量 20% 未満)</span>`;
+            } else if (percent < 50) {
+                progressBar.className = 'h-3 rounded-full bg-amber-500 transition-all duration-300';
+                warningBadge.innerHTML = `<span class="text-xs bg-emerald-100 text-emerald-800 font-semibold px-2.5 py-1 rounded-full">正常</span>`;
+            } else {
+                progressBar.className = 'h-3 rounded-full bg-emerald-500 transition-all duration-300';
+                warningBadge.innerHTML = `<span class="text-xs bg-emerald-100 text-emerald-800 font-semibold px-2.5 py-1 rounded-full">十分あり</span>`;
+            }
+
+            document.getElementById('detailCurrentWeight').textContent = `${target.currentWeight} g`;
+            document.getElementById('detailInitialWeight').textContent = `${target.initialWeight} g`;
+            document.getElementById('detailSpoolWeight').textContent = `${target.spoolWeight || 200} g`;
+            document.getElementById('detailTotalSpoolWeight').textContent = `${target.currentWeight + (target.spoolWeight || 200)} g (総計)`;
+
+            document.getElementById('detailNozzleTemp').textContent = target.nozzleTemp ? `${target.nozzleTemp} °C` : '未設定';
+            document.getElementById('detailBedTemp').textContent = target.bedTemp ? `${target.bedTemp} °C` : '未設定';
+
+            // Logs table for this specific spool
+            const logsTable = document.getElementById('detailLogsTable');
+            const filteredLogs = usageLogs.filter(l => l.filamentId === target.id).sort((a,b) => new Date(b.date) - new Date(a.date));
+
+            if (filteredLogs.length === 0) {
+                logsTable.innerHTML = `<tr><td colspan="3" class="p-3 text-center text-slate-400">使用記録はありません。</td></tr>`;
+            } else {
+                logsTable.innerHTML = filteredLogs.map(l => {
+                    const d = new Date(l.date).toLocaleString('ja-JP', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
+                    return `
+                        <tr>
+                            <td class="p-2 text-slate-500 whitespace-nowrap">${d}</td>
+                            <td class="p-2 font-bold text-indigo-600 font-mono">-${l.amount} g</td>
+                            <td class="p-2 text-slate-600">${l.purpose ? escapeHTML(l.purpose) : '-'}</td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+
+            modal.classList.remove('hidden');
+        }
+
+        function closeDetailModal() {
+            document.getElementById('detailModal').classList.add('hidden');
+            selectedFilamentForDetail = null;
+        }
+
+        function openConfirmModal(id, name) {
+            deleteTargetId = id;
+            document.getElementById('confirmModalText').textContent = `「${name}」のデータを完全に削除しますか？関連する使用ログは保持されます。`;
+            document.getElementById('confirmModal').classList.remove('hidden');
+        }
+
+        function closeConfirmModal() {
+            deleteTargetId = null;
+            document.getElementById('confirmModal').classList.add('hidden');
+        }
+
+        function deleteFilament(id) {
+            filaments = filaments.filter(f => f.id !== id);
+            saveData();
+            renderUI();
+            showToast('スプールを削除しました', 'info');
+        }
+
+        // View Mode Toggle Handler
+        function setViewMode(mode) {
+            activeViewMode = mode;
+            const btnGrid = document.getElementById('btnGridView');
+            const btnList = document.getElementById('btnListView');
+            const btnAnalytics = document.getElementById('btnAnalyticsView');
+
+            [btnGrid, btnList, btnAnalytics].forEach(btn => {
+                btn.className = 'px-2.5 py-1 rounded text-xs font-medium text-slate-600 hover:text-slate-900 transition';
+            });
+
+            if (mode === 'grid') {
+                btnGrid.className = 'px-2.5 py-1 rounded text-xs font-medium bg-white text-indigo-600 shadow-sm transition';
+            } else if (mode === 'list') {
+                btnList.className = 'px-2.5 py-1 rounded text-xs font-medium bg-white text-indigo-600 shadow-sm transition';
+            } else if (mode === 'analytics') {
+                btnAnalytics.className = 'px-2.5 py-1 rounded text-xs font-medium bg-white text-indigo-600 shadow-sm transition';
+            }
+
+            renderUI();
+        }
+
+        // Toast Message Notification Helper
+        function showToast(msg, type = 'success') {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toastMessage');
+            const toastIcon = document.getElementById('toastIcon');
+
+            toastMsg.textContent = msg;
+
+            if (type === 'warning') {
+                toastIcon.className = 'text-amber-400 text-lg';
+                toastIcon.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i>`;
+            } else if (type === 'info') {
+                toastIcon.className = 'text-blue-400 text-lg';
+                toastIcon.innerHTML = `<i class="fa-solid fa-circle-info"></i>`;
+            } else {
+                toastIcon.className = 'text-emerald-400 text-lg';
+                toastIcon.innerHTML = `<i class="fa-solid fa-circle-check"></i>`;
+            }
+
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+
+            setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3500);
+        }
+
+        // XSS Prevention Utility
+        function escapeHTML(str) {
+            if (!str) return '';
+            return str.replace(/[&<>'"]/g, 
+                tag => ({
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    "'": '&#39;',
+                    '"': '&quot;'
+                }[tag] || tag)
+            );
+        }
+    </script>
+</body>
+</html>
